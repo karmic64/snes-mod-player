@@ -1,0 +1,1558 @@
+.memorymap
+defaultslot 2
+slot 0 $0000 $00f0
+slot 1 $0200 $0500
+slot 2 $0700 $f8c0
+.endme
+
+.rombankmap
+bankstotal 1
+banksize $f8c0
+banks 1
+.endro
+
+
+;spc ports
+.define TEST $f0
+.define CONTROL $f1
+
+.define DSPADDR $f2
+.define DSPDATA $f3
+
+.define CPUIO0 $f4
+.define CPUIO1 $f5
+.define CPUIO2 $f6
+.define CPUIO3 $f7
+
+.define AUXIO4 $f8
+.define AUXIO5 $f9
+
+.define T0DIV $fa
+.define T1DIV $fb
+.define T2DIV $fc
+
+.define T0OUT $fd
+.define T1OUT $fe
+.define T2OUT $ff
+
+
+
+;dsp regs
+.define MVOLL $0c
+.define MVOLR $1c
+.define EVOLL $2c
+.define EVOLR $3c
+.define KON $4c
+.define KOFF $5c
+.define FLG $6c
+.define ENDX $7c
+.define EFB $0d
+.define PMON $2d
+.define NON $3d
+.define EON $4d
+.define DIR $5d
+.define ESA $6d
+.define EDL $7d
+
+.define FIRx $0f
+
+.define VxVOLL $00
+.define VxVOLR $01
+.define VxPITCHL $02
+.define VxPITCHH $03
+.define VxSRCN $04
+.define VxADSR1 $05
+.define VxADSR2 $06
+.define VxGAIN $07
+.define VxENVX $08
+.define VxOUTX $09
+
+
+
+
+
+
+.define MIN_PERIOD 108
+.define MAX_PERIOD 907
+.define AMT_PERIODS (MAX_PERIOD-MIN_PERIOD)+1
+
+.define AMT_NOTES $24
+
+    .ramsection "zp_vars" slot 0
+temp:
+    dsb 8
+    
+    
+    
+comms_cnt:
+    db
+    
+play_enabled:
+    db
+    
+    
+tempo:
+    db
+tempo_cnt:
+    db
+arp_cnt:
+    db
+    
+    
+delay_cnt:
+    db
+    
+skip_flag:
+    db
+song_length:
+    db
+seq_index:
+    db
+ptn_row:
+    db
+    
+konflag:
+    db
+    .ends
+    
+    
+    .ramsection "chn_vars" slot 0 align 4
+chn_timer:
+    dsb 4
+chn_dur:
+    dsb 4
+chn_index:
+    dsb 4
+    
+chn_volume:
+    dsb 4
+    
+chn_pan:
+    dsb 4
+    
+chn_sample:
+    dsb 4
+    
+chn_note:
+    dsb 4
+chn_retrig: ;$00-$23: set note and retrig
+    dsb 4   ;$40-$63: set note, sample, and retrig
+            ;$80-$ff is a no-op
+
+chn_finetune:
+    dsb 4
+    
+chn_period_lo:
+    dsb 4
+chn_period_hi:
+    dsb 4
+    
+chn_eff:
+    dsb 4
+chn_eff_param:
+    dsb 4
+    
+chn_tporta_spd:
+    dsb 4
+chn_tporta_dir: ;0-none, 1-up, 2-down
+    dsb 4
+chn_tporta_lo:
+    dsb 4
+chn_tporta_hi:
+    dsb 4
+    
+chn_vib_spd:
+    dsb 4
+chn_vib_shape:
+    dsb 4
+chn_vib_phase:
+    dsb 4
+    
+chn_trem_spd:
+    dsb 4
+chn_trem_shape:
+    dsb 4
+chn_trem_phase:
+    dsb 4
+    
+chn_retrig_cnt: ;this is for the retrig effect E9x
+    dsb 4
+    
+    .ends
+    
+    
+    .ramsection "song_vars" slot 1 align $100
+pattern_tbl_lo:
+    dsb 256
+pattern_tbl_hi:
+    dsb 256
+    
+sequence_0:
+    dsb 128
+sequence_1:
+    dsb 128
+sequence_2:
+    dsb 128
+sequence_3:
+    dsb 128
+    
+sample_volume:
+    dsb 31
+sample_finetune:
+    dsb 31
+    .ends
+    
+    
+.define dirtbl $0100
+
+
+    .bank 0
+    
+    
+    .orga $0700
+    .section "main" force
+    
+reset:
+    mov CONTROL,#1 ;disable rom, enable timer 0
+    
+    mov a,#0
+    mov comms_cnt,a
+    mov x,#CPUIO0
+    mov (x)+,a
+    mov (x)+,a
+    mov (x)+,a
+    mov a,#$9a ;tell cpu we are ready to receive bytes
+    mov (x)+,a
+    
+    
+    mov x,#$7f
+    mov sp,x
+    mov a,#<blanksamp
+    mov y,#>blanksamp
+-:  push y
+    push a
+    mov x,sp
+    bpl -
+    
+    
+    ;disable echo
+    mov a,#0
+    mov DSPADDR,#EVOLL
+    mov DSPDATA,a
+    mov DSPADDR,#EVOLR
+    mov DSPDATA,a
+    mov DSPADDR,#EON
+    mov DSPDATA,a
+    mov DSPADDR,#ESA
+    mov DSPDATA,#1
+    mov DSPADDR,#EDL
+    mov DSPDATA,#0
+    
+    mov DSPADDR,#NON
+    mov DSPDATA,a
+    mov DSPADDR,#PMON
+    mov DSPDATA,a
+    
+    mov DSPADDR,#DIR
+    mov DSPDATA,#>dirtbl
+    
+    mov x,#$7f
+    mov DSPADDR,#MVOLL
+    mov DSPDATA,x
+    mov DSPADDR,#MVOLR
+    mov DSPDATA,x
+    
+    
+    call !stop_song
+    
+    
+    
+main:
+    mov y,T0OUT
+    
+mainloop:
+    cmp CPUIO0,comms_cnt
+    bne get_from_snes
+    
+    mov y,T0OUT
+    beq mainloop
+    mov a,play_enabled
+    beq mainloop
+    
+-:  push y
+    call !main_play
+    pop y
+    dbnz y,-
+    
+    bra mainloop
+    
+    
+    
+    
+get_from_snes:
+    mov a,CPUIO0
+    mov comms_cnt,a
+    
+    mov x,CPUIO1 ;get the command value
+    mov CPUIO0,a ;ack
+    
+    jmp [!@tbl+x]
+    
+@tbl:
+    .dw snes_receive_module
+    .dw snes_play_module
+    .dw snes_stop_module
+    
+    
+    
+    
+    
+snes_receive_module:
+    call !stop_song ;stop all sound
+    
+    mov temp,#<main_end ;set up pointer to free memory
+    mov temp+1,#>main_end
+    
+    ;;;;read all patterns
+    call !receive ;get amount of patterns
+    mov temp+3,a
+    
+    mov temp+4,#0 ;counter for which pattern we're on
+    
+--: mov y,temp+4
+    mov a,temp
+    mov !pattern_tbl_lo+y,a
+    mov a,temp+1
+    mov !pattern_tbl_hi+y,a
+    
+    call !receive ;get pattern size
+    mov temp+2,a
+    call !receive_block
+    
+    mov a,y ;step pointer
+    mov y,#0
+    addw ya,temp
+    movw temp,ya
+    
+    inc temp+4
+    cmp temp+3,temp+4
+    bne --
+    
+    
+    
+    
+    ;;;;read in 4 sequences
+    mov a,temp
+    push a
+    mov a,temp+1
+    push a
+    call !receive
+    mov song_length,a
+    mov temp+2,a
+    
+    mov x,#0 ;sequence number
+--:
+    mov a,!sequence_lo+x
+    mov temp,a
+    mov a,!sequence_hi+x
+    mov temp+1,a
+    push x
+    call !receive_block
+    pop x
+    inc x
+    cmp x,#4
+    bcc --
+    pop a
+    mov temp+1,a
+    pop a
+    mov temp,a
+    
+    
+    
+    
+    ;;;;read 31 samples
+    mov x,#0
+    
+@samploop:
+    mov a,x
+    asl a
+    asl a
+    mov y,a
+    call !receive ;get sample size
+    mov temp+2,a
+    call !receive
+    mov temp+3,a
+    or a,temp+2 ;if it's 0, skip
+    bne @@realsamp
+    mov a,#<blanksamp
+    mov !dirtbl+4+y,a
+    mov !dirtbl+6+y,a
+    mov a,#>blanksamp
+    mov !dirtbl+5+y,a
+    mov !dirtbl+7+y,a
+    bra @@nextsamp
+@@realsamp:
+    mov a,temp
+    mov !dirtbl+4+y,a
+    mov a,temp+1
+    mov !dirtbl+5+y,a
+    
+    call !receive ;get loop point
+    mov temp+4,a
+    call !receive
+    mov temp+5,a
+    and a,temp+4 ;if loop is $ffff, there is no loop
+    cmp a,#$ff
+    bne @@realloop
+    mov a,#<blanksamp
+    mov !dirtbl+6+y,a
+    mov a,#>blanksamp
+    bra @@afterloop
+@@realloop:
+    mov a,temp+4
+    clrc
+    adc a,temp
+    mov !dirtbl+6+y,a
+    mov a,temp+5
+    adc a,temp+1
+@@afterloop:
+    mov !dirtbl+7+y,a
+    
+    call !receive ;get sample volume/finetune
+    mov !sample_volume+x,a
+    call !receive
+    mov !sample_finetune+x,a
+    
+    push x
+    call !receive_block_long
+    pop x
+    
+    
+@@nextsamp:
+    inc x
+    cmp x,#31
+    bcc @samploop
+    
+    
+    jmp !main
+    
+    
+    
+snes_play_module:
+    call !stop_song
+    mov play_enabled,#1
+    jmp !main
+    
+    
+    
+snes_stop_module:
+    call !stop_song
+    jmp !main
+    
+    
+    ;only use this routine for transfers of a couple bytes
+receive:
+-:  cmp CPUIO0,comms_cnt
+    beq -
+    mov a,CPUIO1
+    mov comms_cnt,CPUIO0
+    mov CPUIO0,comms_cnt
+    ret
+    
+    
+    ;pointer in temp, bytes to get in temp+2
+receive_block:
+    mov y,#0
+    mov x,comms_cnt
+-:  cmp x,CPUIO0
+    beq -
+    mov a,CPUIO1
+    inc x
+    mov CPUIO0,x
+    mov [temp]+y,a
+    inc y
+    cmp y,temp+2
+    bne -
+    mov comms_cnt,x
+    ret
+    
+    
+receive_block_long:
+    mov y,#0
+    mov x,comms_cnt
+-:  cmp x,CPUIO0
+    beq -
+    mov a,CPUIO1
+    inc x
+    mov CPUIO0,x
+    mov [temp]+y,a
+    incw temp
+    decw temp+2
+    bne -
+    mov comms_cnt,x
+    ret
+    
+    
+    
+    
+stop_song:
+    mov a,#0
+    mov play_enabled,a
+    
+    ;set all channels to 0 gain
+    mov x,a
+@gaininit:
+    mov y,a
+    or a,#VxADSR1
+    mov DSPADDR,a
+    mov DSPDATA,x
+    
+    mov a,y
+    or a,#VxGAIN
+    mov DSPADDR,a
+    mov DSPDATA,x
+    
+    mov a,y
+    or a,#VxSRCN
+    mov DSPADDR,a
+    mov DSPDATA,x
+    
+    mov a,y
+    clrc
+    adc a,#$10
+    bpl @gaininit
+    
+    
+    mov DSPADDR,#FLG
+    mov DSPDATA,#$20
+    
+    
+    
+    ;init player vars
+    mov a,#0
+    mov tempo,#6
+    mov tempo_cnt,#6-1
+    mov arp_cnt,a
+    mov delay_cnt,a
+    mov skip_flag,#$ff
+    mov seq_index,a
+    mov ptn_row,a
+    
+    mov x,#3
+@initchnloop:
+    mov a,#0
+    mov chn_timer+x,a
+    mov chn_index+x,a
+    mov chn_volume+x,a
+    mov chn_sample+x,a
+    mov chn_period_lo+x,a
+    mov chn_period_hi+x,a
+    mov chn_eff+x,a
+    mov chn_eff_param+x,a
+    mov chn_tporta_dir+x,a
+    mov chn_vib_shape+x,a
+    mov chn_trem_shape+x,a
+    dec a
+    mov chn_retrig+x,a
+    dec x
+    bpl @initchnloop
+    
+    
+    mov x,#chn_pan
+    mov a,#$40
+    mov (x)+,a
+    mov a,#$c0
+    mov (x)+,a
+    mov (x)+,a
+    mov a,#$40
+    mov (x)+,a
+    
+    
+    ;set timer to the default
+    mov a,!timer_tbl-$20+125
+    mov T0DIV,a
+    
+    ret
+    
+    
+    
+    
+main_play:
+    mov a,#0
+    mov konflag,a
+    
+    inc arp_cnt
+    cmp arp_cnt,#3
+    bne +
+    mov arp_cnt,a
++:  
+    
+    inc tempo_cnt
+    cmp tempo_cnt,tempo
+    bne @no_next_row
+    mov tempo_cnt,a
+    mov arp_cnt,a
+    
+    mov y,delay_cnt
+    beq +
+    dec delay_cnt
+    bne @no_next_row
++:  
+    
+    mov y,skip_flag
+    bmi @new_seq_check
+    mov seq_index,y
+    mov skip_flag,#$ff
+    bra @new_seq
+    
+@new_seq_check:
+    cmp ptn_row,#$40
+    bne @no_new_seq
+    inc seq_index
+    cmp seq_index,song_length
+    bcc +
+    mov seq_index,a
++:
+@new_seq:
+    mov ptn_row,a
+    mov chn_timer+0,a
+    mov chn_timer+1,a
+    mov chn_timer+2,a
+    mov chn_timer+3,a
+    mov chn_index+0,a
+    mov chn_index+1,a
+    mov chn_index+2,a
+    mov chn_index+3,a
+@no_new_seq:
+    inc ptn_row
+    
+    
+    ;do channel reads for each row
+    mov x,#3
+-:  call !do_chn_pattern
+    dec x
+    bpl -
+    
+@no_next_row:
+    
+    
+    
+    ;handle effects/output
+    mov x,#3
+@effloop:
+    call !do_chn_note
+    call !do_chn_eff
+    call !do_chn_spc
+    dec x
+    bpl @effloop
+    
+    
+    mov DSPADDR,#KON
+    mov DSPDATA,konflag
+    
+-:
+    ret
+    
+    
+    
+do_chn_pattern:
+    mov a,#0
+    mov chn_retrig_cnt+x,a
+    
+    dec chn_timer+x
+    bpl -
+    
+    mov a,!sequence_lo+x
+    mov temp,a
+    mov a,!sequence_hi+x
+    mov temp+1,a
+    mov y,seq_index
+    mov a,[temp]+y
+    mov y,a
+    mov a,!pattern_tbl_lo+y
+    mov temp,a
+    mov a,!pattern_tbl_hi+y
+    mov temp+1,a
+    
+    mov y,chn_index+x
+    mov a,[temp]+y
+    ;pattern repeat?
+    cmp a,#$8e
+    bne +
+    mov y,#0
+    mov a,[temp]+y
++:  
+    inc y
+    ;duration change?
+    cmp a,#$c0
+    bcc +
+    and a,#$3f
+    mov chn_dur+x,a
+    mov a,[temp]+y
+    inc y
++:  
+    ;sample set?
+    cmp a,#$a0
+    bcc +
+    and a,#$1f
+    mov chn_sample+x,a
+    mov a,[temp]+y
+    inc y
++:  
+    ;effect?
+    cmp a,#$8f
+    bcc @noeff
+    bne @bigeff
+    mov a,#0
+    mov chn_eff+x,a
+    bra @effsetend
+@bigeff:
+    cmp a,#$9e ;Exx
+    bne @normeff
+    mov a,[temp]+y
+    xcn a
+    and a,#$0f
+    asl a
+    adc a,#$10 * 2
+    mov chn_eff+x,a
+    mov a,[temp]+y
+    inc y
+    and a,#$0f
+    bra @effsetend
+@normeff:
+    and a,#$0f
+    asl a
+    mov chn_eff+x,a
+    mov a,[temp]+y
+    inc y
+@effsetend:
+    mov chn_eff_param+x,a
+    mov a,[temp]+y
+    inc y
+@noeff:
+    
+    ;ok, it's a note
+    mov chn_index+x,y
+    
+    
+    mov chn_retrig+x,a
+    and a,#$3f
+    cmp a,#AMT_NOTES
+    bcs +
+    mov chn_note+x,a
++:
+    
+    
+    
+    mov a,chn_dur+x
+    mov chn_timer+x,a
+@return:
+    ret
+    
+    
+    
+    
+    
+    
+do_chn_note:
+    ;;;special case for retrig (E9x) and delay (EDx) effects
+    mov a,chn_eff+x
+    cmp a,#$19 * 2
+    beq @retrig
+    cmp a,#$1d * 2
+    bne @nospecial
+@delay:
+    mov a,chn_eff_param+x ;do not allow any retriggering until the delay is done
+    cmp a,tempo_cnt
+    beq @nospecial
+    ret
+    
+@retrig:
+    mov y,chn_retrig_cnt+x ;need to retrig?
+    bne @@end
+    mov a,chn_retrig+x ;don't retrig if it's already happening
+    and a,#$3f
+    cmp a,#AMT_NOTES
+    bcc @@end
+    mov y,chn_note+x
+    mov chn_retrig+x,y
+@@end:
+    inc chn_retrig_cnt+x
+    mov a,chn_eff_param+x
+    cmp a,chn_retrig_cnt+x
+    bne @noretrig
+@@reset:
+    mov a,#0
+    mov chn_retrig_cnt+x,a
+@noretrig:
+
+
+
+@nospecial:
+    
+    
+    ;;;handle note pitch/sample-resets
+    mov a,chn_retrig+x
+    bmi @nonote
+    cmp a,#$40 ;with sample reset?
+    bcc @nosampreset
+    push a
+    mov y,chn_sample+x
+    mov a,!sample_volume-1+y
+    mov chn_volume+x,a
+@finetune:  ;set sample finetune, UNLESS there is an E5x effect overriding it
+    mov a,chn_eff+x
+    cmp a,#$15 * 2
+    bne @@normal
+    mov a,chn_eff_param+x
+    bra @@set
+@@normal:
+    mov a,!sample_finetune-1+y
+@@set:
+    mov chn_finetune+x,a
+    pop a
+    and a,#$3f
+@nosampreset:
+    cmp a,#AMT_NOTES
+    bcs @nonote
+    asl a
+    mov y,a
+    
+    push y ;set up pointer to period table
+    mov y,chn_finetune+x
+    mov a,!period_tbl_lo+y
+    mov temp,a
+    mov a,!period_tbl_hi+y
+    mov temp+1,a
+    pop y
+    
+    mov a,chn_eff+x
+    cmp a,#$3 * 2
+    beq @tporta
+    cmp a,#$5 * 2
+    bne @notemain
+@tporta:
+
+    mov a,#$ff ;don't allow tone-porta notes to be keyed-on
+    mov chn_retrig+x,a
+    
+    mov a,#1
+    mov chn_tporta_dir+x,a
+    
+    mov a,[temp]+y
+    mov chn_tporta_lo+x,a
+    cmp a,chn_period_lo+x
+    inc y
+    mov a,[temp]+y
+    mov chn_tporta_hi+x,a
+    sbc a,chn_period_hi+x
+    bcc @afternote
+    inc chn_tporta_dir+x ;if target > period, slide down
+    bra @afternote
+    
+@notemain:
+    mov a,[temp]+y
+    mov chn_period_lo+x,a
+    inc y
+    mov a,[temp]+y
+    mov chn_period_hi+x,a
+    
+    mov y,#0
+    mov chn_tporta_dir+x,y
+    
+    ;reset vibrato/tremolo phases
+    mov a,chn_vib_shape+x
+    and a,#4
+    bne +
+    mov chn_vib_phase+x,y
++:  mov a,chn_trem_shape+x
+    and a,#4
+    bne +
+    mov chn_trem_phase+x,y
++:  
+    
+@afternote:
+@nonote:
+    ret
+    
+    
+    
+    
+    
+    
+do_chn_eff:
+    mov y,chn_eff+x
+    mov a,!@tbl+1+y
+    push a
+    mov a,!@tbl+0+y
+    push a
+    
+    mov a,chn_eff_param+x
+@return:
+    ret
+    
+    
+@tbl:
+    .dw @return     ;0 (handled elsewhere)
+    .dw @portaup    ;1
+    .dw @portadn    ;2
+    .dw @tporta     ;3
+    .dw @return     ;4 (handled elsewhere)
+    .dw @volporta   ;5
+    .dw @volslide   ;6 (vibrato part is handled elsewhere)
+    .dw @return     ;7 (handled elsewhere)
+    .dw @pan        ;8
+    .dw @return     ;9
+    .dw @volslide   ;A
+    .dw @seqjump    ;B
+    .dw @setvol     ;C
+    .dw @pattbreak  ;D (nonzero params are unsupported)
+    .dw 0           ;E (should never be executed)
+    .dw @settempo   ;F
+
+    .dw @return     ;E0x (useless on snes)
+    .dw @fineporup  ;E1x
+    .dw @finepordn  ;E2x
+    .dw @return     ;E3x
+    .dw @vibshape   ;E4x
+    .dw @finetune   ;E5x (also has a special handler elsewhere)
+    .dw @return     ;E6x
+    .dw @tremshape  ;E7x
+    .dw @finepan    ;E8x
+    .dw @return     ;E9x (handled elsewhere)
+    .dw @finevolup  ;EAx
+    .dw @finevoldn  ;EBx
+    .dw @cut        ;ECx
+    .dw @return     ;EDx (handled elsewhere)
+    .dw @pattdelay  ;EEx
+    .dw @return     ;EFx (useless in general)
+    
+    
+    
+    
+    
+    
+@fineporup:
+    mov y,tempo_cnt
+    bne @portadn@return
+    bra @portaup@main
+    
+@portaup:
+    mov y,tempo_cnt
+    beq @portadn@return
+    
+@@main:
+    mov y,chn_period_hi+x
+    eor a,#$ff
+    setc
+    adc a,chn_period_lo+x
+    bcs @portadn@setper
+    dec y
+    bpl @portadn@setper
+    mov a,#0
+    mov y,a
+    bra @portadn@setper
+    
+    
+@finepordn:
+    mov y,tempo_cnt
+    bne @portadn@return
+    bra @portadn@main
+    
+@portadn:
+    mov y,tempo_cnt
+    beq @@return
+    
+@@main:
+    mov y,chn_period_hi+x
+    clrc
+    adc a,chn_period_lo+x
+    bcc +
+    inc y
++:  
+    push a
+    cmp a,#<AMT_PERIODS
+    mov a,y
+    sbc a,#>AMT_PERIODS
+    pop a
+    bcc @@setper
+    mov a,#<(AMT_PERIODS-1)
+    mov y,#>(AMT_PERIODS-1)
+@@setper:
+    mov chn_period_lo+x,a
+    mov chn_period_hi+x,y
+@@return:
+    ret
+    
+    
+    
+@volporta:
+    call !@volslide
+    bra @tporta@recall
+    
+@tporta:
+    mov y,a
+    bne +
+@@recall:
+    mov a,chn_tporta_spd+x
++:  mov chn_tporta_spd+x,a
+    
+    mov y,tempo_cnt
+    beq @@return
+    mov y,chn_tporta_dir+x
+    beq @@return
+    dec y
+    bne @@down
+@@up:
+    call !@portaup@main
+    cmp a,chn_tporta_lo+x
+    mov a,y
+    sbc a,chn_tporta_hi+x
+    bcs @@return
+@@set:  ;if period < target, end porta
+    mov a,#0
+    mov chn_tporta_dir+x,a
+    mov a,chn_tporta_lo+x
+    mov y,chn_tporta_hi+x
+    bra @portadn@setper
+    
+@@down:
+    call !@portadn@main
+    cmp a,chn_tporta_lo+x
+    mov a,y
+    sbc a,chn_tporta_hi+x
+    bcs @@set
+@@return:
+    ret
+    
+    
+    
+    
+@finevoldn:
+    eor a,#$ff
+    inc a
+@finevolup:
+    mov y,tempo_cnt
+    bne @setvol@return
+    mov y,a
+    bra @volslide@main
+    
+@volslide:
+    mov y,tempo_cnt
+    beq @setvol@return
+    mov y,a
+    and a,#$0f
+    eor a,#$ff
+    inc a
+    mov temp,a
+    mov a,y
+    xcn a
+    and a,#$0f
+    clrc
+    adc a,temp
+@@main:
+    clrc
+    bpl @@add
+@@sub:
+    adc a,chn_volume+x
+    bcs +
+    mov a,#0
+    bra +
+@@add:
+    adc a,chn_volume+x
+@setvol:
+    cmp a,#$40+1
+    bcc +
+    mov a,#$40
++:  
+    mov chn_volume+x,a
+@@return:
+    ret
+    
+    
+    
+    
+@finepan:
+    mov temp,a
+    xcn a
+    or a,temp
+@pan:
+    mov chn_pan+x,a
+    ret
+    
+    
+    
+    
+@settempo:
+    beq +
+    cmp a,#$20
+    bcc @@ticks
+    mov y,a
+    mov a,!timer_tbl-$20+y
+    mov T0DIV,a
+    ret
+    
+@@ticks:
+    mov tempo,a
++:
+    ret
+    
+    
+    
+    
+@pattbreak:
+    mov y,skip_flag
+    bpl @seqjump@return
+    mov a,seq_index
+    inc a
+@seqjump:
+    cmp a,song_length
+    bcc +
+    mov a,#0
++:
+    mov skip_flag,a
+@@return:
+    ret
+    
+    
+    
+    
+@vibshape:
+    mov chn_vib_shape+x,a
+    ret
+    
+    
+@tremshape:
+    mov chn_trem_shape+x,a
+    ret
+    
+    
+    
+@finetune:
+    mov chn_finetune+x,a
+    ret
+    
+    
+    
+    
+@pattdelay:
+    mov y,delay_cnt
+    bne +
+    inc a
+    mov delay_cnt,a
++:
+    ret
+    
+    
+    
+    
+@cut:
+    cmp a,tempo_cnt
+    bne @@return
+    mov a,#0
+    mov chn_volume+x,a
+@@return:
+    ret
+    
+
+
+    
+    
+    
+    
+do_chn_spc:
+    mov a,x
+    xcn a
+    mov temp,a
+    
+    
+    
+    ;;;apply vibrato on the period
+@vib:
+    mov a,chn_period_lo+x
+    mov temp+1,a
+    mov a,chn_period_hi+x
+    mov temp+2,a
+    
+    mov a,chn_eff+x
+    cmp a,#$6 * 2
+    beq @@recall
+    cmp a,#$4 * 2
+    bne @@novib
+    mov y,chn_eff_param+x ;param 0 means recall the old speed
+    bne +
+@@recall:
+    mov y,chn_vib_spd+x
++:  mov chn_vib_spd+x,y
+    
+    mov a,chn_vib_phase+x
+    mov temp+3,a
+    mov a,chn_vib_shape+x
+    call !get_tremolo_delta
+    push a
+    mov a,tempo_cnt ;don't update phase on first tick
+    beq +
+    mov chn_vib_phase+x,y
++:  pop a
+    mov y,temp+2
+    cmp a,#$80
+    ror a
+    clrc
+    bmi @@sub
+@@add:
+    adc a,temp+1
+    bcc +
+    inc y
++:  cmp a,#<AMT_PERIODS
+    push a
+    mov a,y
+    sbc a,#>AMT_PERIODS
+    pop a
+    bcc @@set
+    mov a,#<(AMT_PERIODS-1)
+    mov y,#>(AMT_PERIODS-1)
+    bra @@set
+    
+@@sub:
+    adc a,temp+1
+    bcs @@set
+    dec y
+    bpl @@set
+    mov a,#0
+    mov y,a
+    
+@@set:
+    movw temp+1,ya
+@@novib:
+
+    ;;;get spc freq from period
+    asl temp+1
+    rol temp+2
+    mov a,#<freq_tbl
+    mov y,#>freq_tbl
+    addw ya,temp+1
+    movw temp+1,ya
+    
+    
+    mov y,#0
+    mov a,[temp+1]+y
+    push a
+    inc y
+    mov a,[temp+1]+y
+    mov temp+2,a
+    pop a
+    mov temp+1,a
+    
+    
+    ;;;arpeggiate note
+@arp:
+    mov y,arp_cnt
+    beq @@noarp
+    mov a,chn_eff+x
+    ;cmp a,#$0 * 2
+    bne @@noarp
+    mov a,chn_eff_param+x
+    dec y
+    bne @@2
+    xcn a
+@@2:
+    and a,#$0f
+    beq @@noarp
+    push x
+    mov x,a
+    
+    ;add = freq * (arpratio & $ff)
+    mov y,temp+1
+    mov a,!(arp_tbl_lo-1)+x
+    mul ya
+    movw temp+3,ya
+    mov a,#0
+    mov y,a
+    movw temp+5,ya
+    mov temp+7,a
+    mov y,temp+2
+    mov a,!(arp_tbl_lo-1)+x
+    mul ya
+    addw ya,temp+4
+    movw temp+4,ya
+    
+    ;add += freq * (arpratio & $ff00)
+    mov y,temp+1
+    mov a,!(arp_tbl_hi-1)+x
+    mul ya
+    addw ya,temp+4
+    movw temp+4,ya
+    bcc +
+    inc temp+6
++:  mov y,temp+2
+    mov a,!(arp_tbl_hi-1)+x
+    mul ya
+    addw ya,temp+5
+    movw temp+5,ya
+    bcc +
+    inc temp+7
++:  
+    
+    ;arpratio is a 1.15 fixedpoint value, freq is a 16.0 value
+    ;so, bits 15+ of the product are the integer part and below is fractional
+    ;so, shift all bytes containing integer bits until the integer part is on a byte boundary
+    asl temp+4
+    rol temp+5
+    rol temp+6
+    ;now add it to the freq
+    movw ya,temp+5
+    addw ya,temp+1
+    movw temp+1,ya
+    
+    pop x
+    
+@@noarp:
+    
+    
+    ;actually write freq
+    mov a,temp
+    or a,#VxPITCHL
+    mov y,a
+    mov DSPADDR,a
+    mov DSPDATA,temp+1
+    inc y
+    mov DSPADDR,y
+    mov DSPDATA,temp+2
+    
+    
+    
+    
+    
+    ;;;set channel panning
+@pan:
+    mov a,chn_pan+x
+    bmi @@right
+@@left:
+    mov y,a
+    mov a,#VxVOLL
+    or a,temp
+    mov DSPADDR,a
+    
+    mov a,#VxVOLR
+    bra @@after
+@@right:
+    eor a,#$ff
+    mov y,a
+    mov a,#VxVOLR
+    or a,temp
+    mov DSPADDR,a
+    
+    mov a,#VxVOLL
+@@after:
+    mov DSPDATA,#$7f
+    or a,temp
+    mov DSPADDR,a
+    mov DSPDATA,y
+    
+    
+    
+    
+    ;;;set channel gain (optionally applying tremolo)
+    mov a,temp
+    or a,#VxGAIN
+    mov DSPADDR,a
+    
+@trem:
+    mov a,chn_volume+x
+    mov y,chn_eff+x
+    cmp y,#$7 * 2
+    bne @@notrem
+    
+    mov y,chn_eff_param+x
+    bne +
+    mov y,chn_trem_spd+x
++:  mov chn_trem_spd+x,y
+    
+    mov a,chn_trem_phase+x
+    mov temp+3,a
+    mov a,chn_trem_shape+x
+    call !get_tremolo_delta
+    push a
+    mov a,tempo_cnt ;don't update phase on first tick
+    beq +
+    mov chn_trem_phase+x,y
++:  pop a
+    clrc
+    mov y,a
+    bpl @@add
+@@sub:
+    adc a,chn_volume+x
+    bcs @@set
+    mov a,#0
+    bra @@set
+@@add:
+    adc a,chn_volume+x
+    bcs @@set
+    cmp a,#$41
+    bcc @@set
++:  mov a,#$40
+@@set:
+@@notrem:
+    mov DSPDATA,a
+    
+    
+    
+    ;;;if channel will be keyed-on, reset srcn, then key it on
+@checkkon:
+    mov a,chn_eff+x ;don't allow any retriggering until delay is done
+    cmp a,#$1d * 2
+    bne @@nodelay
+    mov a,chn_eff_param+x
+    cmp a,tempo_cnt
+    bne @nokon
+@@nodelay:
+    mov a,chn_retrig+x
+    bmi @nokon
+    and a,#$3f
+    cmp a,#AMT_NOTES
+    bcs @@end
+    mov a,temp
+    or a,#VxSRCN
+    mov DSPADDR,a
+    mov a,chn_sample+x
+    mov DSPDATA,a
+    
+    
+    
+    ;modules sound better if sounds are keyed-on all at once so we buffer the KON reg
+    mov a,!kontbl+x
+    or a,konflag
+    mov konflag,a
+    
+@@end:
+    mov a,#$ff
+    mov chn_retrig+x,a
+@nokon:
+    
+    ret
+    
+    
+    
+    ;parameter in Y, shape in A, phase in temp+3
+    ;routine should not change temp0-temp2
+    ;returns new phase in Y and signed delta in A
+get_tremolo_delta:
+    mov temp+4,y
+    and a,#3
+    asl a
+    mov y,a
+    
+    mov a,!@tbl+1+y
+    push a
+    mov a,!@tbl+y
+    push a
+    
+    mov y,temp+4
+    mov a,y
+    xcn a
+    and a,#$0f
+    mov temp+4,a ;speed
+    mov a,y
+    and a,#$0f
+    mov temp+5,a ;depth
+    
+    mov a,temp+3
+    cmp a,#$20 ;"sign bit" in C
+    and a,#$1f ;actual index in Y
+    mov y,a
+    ret
+    
+@tbl:
+    .word @sine
+    .word @ramp
+    .word @square
+    .word @sine ;should be random but eh
+    
+    
+@sine:
+    mov a,!sine_tbl+y
+    bra @gotten
+    
+@ramp:
+    push psw
+    asl a
+    asl a
+    asl a
+    pop psw
+    bcc @gotten
+    eor a,#$ff
+    bra @gotten
+    
+@square:
+    mov a,#$ff
+    bra @gotten
+    
+    
+    ;now we got it, multiply it by the depth and scale it back
+@gotten:
+    push psw
+    mov y,temp+5
+    mul ya
+    ;right shift 6 times is just left shift once
+    mov temp+5,y
+    asl a
+    rol temp+5
+    asl a
+    mov a,temp+5
+    rol a
+    pop psw
+    ;flip the sign based on second/first half of phase
+    bcc @after
+    eor a,#$ff
+    inc a
+@after:
+    push a
+    mov a,temp+4
+    clrc
+    adc a,temp+3
+    and a,#$3f
+    mov y,a
+    pop a
+    ret
+    
+    
+    
+    
+sequence_lo:
+    .db <sequence_0,<sequence_1,<sequence_2,<sequence_3,
+sequence_hi:
+    .db >sequence_0,>sequence_1,>sequence_2,>sequence_3,
+    
+    
+kontbl:
+    .db 1,2,4,8
+    
+    
+sine_tbl:
+    .db 0, 24, 49, 74, 97,120,141,161
+    .db 180,197,212,224,235,244,250,253
+    .db 255,253,250,244,235,224,212,197
+    .db 180,161,141,120, 97, 74, 49, 24
+    
+    
+blanksamp:
+    .db 1,0,0,0,0,0,0,0,0,0
+    
+    
+    
+    
+    
+    
+    .include "generated-data.asm"
+    
+    
+main_end:
+    .ends
+    
+    
+    
+    
+    
+    
+    
+    
