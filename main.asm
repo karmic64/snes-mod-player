@@ -342,12 +342,12 @@ nmi rep #P_M|P_X
     sep #P_X
     ldy selected
     lda joy
-    bit #BTN_L | BTN_D
+    bit #BTN_L | BTN_U
     beq +
     dey
     bpl +
     ldy #len(mod_list)-1
-+   bit #BTN_R | BTN_U
++   bit #BTN_R | BTN_D
     beq +
     iny
     cpy #len(mod_list)
