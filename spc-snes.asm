@@ -103,6 +103,7 @@ spc_upload_module
     
     lda #0
     xba
+    lda #0
     jsr spc_send_byte
     
     
