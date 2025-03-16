@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <ctype.h>
 #include <math.h>
+#include <errno.h>
 
 
 #define OUTNAME "generated-data.asm"
@@ -15,7 +16,10 @@
 #define MAX_PERIOD 907
 #define AMT_PERIODS (MAX_PERIOD-MIN_PERIOD+1)
 
-#define AMIGA_CLOCK 3579545.0
+// NTSC
+//#define AMIGA_CLOCK 3579545.0
+// PAL
+#define AMIGA_CLOCK 3546895.0
 
 
 const uint16_t note_periods[][12*3] = {

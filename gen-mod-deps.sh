@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+
 outname="mod-deps.txt"
 
 echo -n "OUT_MODS := " > $outname
@@ -5,7 +7,7 @@ echo -n "OUT_MODS := " > $outname
 for fnam in mods/*
 do
   # remove spaces from filenames
-  newname=${fnam// /_}
+  newname="${fnam// /_}"
   if [ "$fnam" != "$newname" ];
   then mv "$fnam" "$newname"
   fi

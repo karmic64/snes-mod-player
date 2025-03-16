@@ -1,1 +1,4 @@
 *.exe
+convert
+gen-data
+gen-mod-list

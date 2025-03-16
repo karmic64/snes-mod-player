@@ -3,6 +3,7 @@
 #include <string.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <errno.h>
 
 
 char innambuf[512] = "mods/";

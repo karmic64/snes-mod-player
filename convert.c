@@ -10,7 +10,10 @@
 
 #define SPC_FREQ 32000.0
 
-#define AMIGA_CLOCK 3579545.0
+// NTSC
+//#define AMIGA_CLOCK 3579545.0
+// PAL
+#define AMIGA_CLOCK 3546895.0
 
 
 
